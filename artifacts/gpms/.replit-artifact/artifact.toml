@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "Graduation Project Management System"
+version = "1.0.0"
+id = "artifacts/gpms"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23983
+
+[services.development]
+run = "pnpm --filter @workspace/gpms run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/gpms", "run", "build" ]
+publicDir = "artifacts/gpms/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23983"
+BASE_PATH = "/"
