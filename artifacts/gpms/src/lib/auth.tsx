@@ -21,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     query: {
       queryKey: getGetMeQueryKey(),
       retry: false,
+      refetchOnWindowFocus: false,
     }
   });
 
@@ -34,10 +35,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [user, error]);
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch {
+      // ignore network errors
+    }
     setLocalUser(null);
     queryClient.setQueryData(getGetMeQueryKey(), null);
-    queryClient.clear();
+    queryClient.removeQueries({ queryKey: getGetMeQueryKey() });
     setLocation("/login");
   };
 
