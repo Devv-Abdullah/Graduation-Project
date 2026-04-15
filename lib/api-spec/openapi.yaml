@@ -33,6 +33,8 @@ tags:
     description: Notifications
   - name: dashboard
     description: Dashboard summaries
+  - name: storage
+    description: Object storage upload and serving endpoints
 
 paths:
   /healthz:
@@ -660,6 +662,13 @@ paths:
       operationId: listSubmissions
       tags: [submissions]
       summary: List submissions
+      parameters:
+        - name: taskId
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Filter submissions by task ID
       responses:
         "200":
           description: Submissions list
@@ -882,6 +891,51 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ActivityLog"
+
+  /storage/uploads/request-url:
+    post:
+      tags: [storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadUrlResponse'
+        '400':
+          description: Missing or invalid required fields
+        '500':
+          description: Failed to generate upload URL
+
+  /storage/objects/{objectPath}:
+    get:
+      tags: [storage]
+      operationId: getStorageObject
+      summary: Serve an uploaded object
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Object content
+          content:
+            '*/*':
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Not found
 
 components:
   schemas:
@@ -1462,3 +1516,27 @@ components:
           $ref: "#/components/schemas/User"
           nullable: true
       required: [id, action, description, createdAt]
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        size:
+          type: integer
+          minimum: 1
+        contentType:
+          type: string
+          minLength: 1
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+          format: uri
+        objectPath:
+          type: string
