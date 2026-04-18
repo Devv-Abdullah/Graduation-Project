@@ -1,9 +1,9 @@
 import { Router } from "express";
 import type { IRouter } from "express";
-import { db, usersTable, teamsTable, teamMembersTable } from "@workspace/db";
+import { db, usersTable, teamsTable, teamMembersTable, invitationsTable } from "@workspace/db";
 import { eq, ilike, and, sql } from "@workspace/db";
 import { requireAuth } from "../lib/session";
-import { logActivity } from "../lib/notify";
+import { createNotification, logActivity } from "../lib/notify";
 
 const router: IRouter = Router();
 
@@ -83,6 +83,54 @@ router.get("/teams/:id/members", requireAuth, async (req, res): Promise<void> =>
     return { ...m, user };
   }));
   res.json(result);
+});
+
+router.post("/teams/:id/join-request", requireAuth, async (req, res): Promise<void> => {
+  if (req.user!.role !== "student") { res.status(403).json({ error: "Only students can request to join a team" }); return; }
+
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, id));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+  if (team.status === "completed") { res.status(400).json({ error: "Cannot join a completed team" }); return; }
+  if (team.leaderId === req.user!.id) { res.status(400).json({ error: "You are already the team leader" }); return; }
+
+  const existingMembership = await db.select().from(teamMembersTable).where(eq(teamMembersTable.userId, req.user!.id));
+  if (existingMembership.length > 0) { res.status(400).json({ error: "You are already in a team" }); return; }
+
+  const existingPending = await db
+    .select()
+    .from(invitationsTable)
+    .where(
+      and(
+        eq(invitationsTable.teamId, id),
+        eq(invitationsTable.invitedUserId, team.leaderId),
+        eq(invitationsTable.invitedByUserId, req.user!.id),
+        eq(invitationsTable.status, "pending"),
+      ),
+    );
+
+  if (existingPending.length > 0) { res.status(400).json({ error: "Join request already sent" }); return; }
+
+  const [invitation] = await db.insert(invitationsTable).values({
+    teamId: id,
+    invitedUserId: team.leaderId,
+    invitedByUserId: req.user!.id,
+  }).returning();
+
+  await createNotification(
+    team.leaderId,
+    "join_request",
+    `${req.user!.name} requested to join your team \"${team.name}\"`,
+    invitation.id,
+    "invitation",
+  );
+
+  await logActivity("join_request_sent", `${req.user!.name} requested to join team \"${team.name}\"`, req.user!.id, id);
+
+  res.status(201).json({ message: "Join request sent" });
 });
 
 router.post("/teams/:id/leave", requireAuth, async (req, res): Promise<void> => {

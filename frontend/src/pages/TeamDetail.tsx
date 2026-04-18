@@ -13,12 +13,14 @@ import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useQueryClient } from "@tanstack/react-query";
 
 export default function TeamDetail() {
   const { id } = useParams();
   const teamId = parseInt(id || "0", 10);
   const { user } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   
   const { data: team, isLoading: isLoadingTeam } = useGetTeam(teamId, {
     query: {
@@ -37,6 +39,8 @@ export default function TeamDetail() {
   const sendInvitation = useSendInvitation();
   const [inviteUserId, setInviteUserId] = useState("");
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [isRequestingJoin, setIsRequestingJoin] = useState(false);
+  const [hasSentJoinRequest, setHasSentJoinRequest] = useState(false);
 
   const handleInvite = async () => {
     try {
@@ -68,6 +72,37 @@ export default function TeamDetail() {
         description: error.message || "Failed to send invitation.",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleJoinRequest = async () => {
+    try {
+      setIsRequestingJoin(true);
+      const response = await fetch(`/api/teams/${teamId}/join-request`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        const message = data && typeof data.error === "string" ? data.error : "Failed to send join request.";
+        throw new Error(message);
+      }
+
+      setHasSentJoinRequest(true);
+      toast({
+        title: "Request sent",
+        description: "Your join request was sent to the team leader.",
+      });
+      queryClient.invalidateQueries({ queryKey: getGetTeamMembersQueryKey(teamId) });
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to send join request.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRequestingJoin(false);
     }
   };
 
@@ -105,6 +140,8 @@ export default function TeamDetail() {
   }
 
   const isLeader = members?.some(m => m.userId === user?.id && m.role === 'leader');
+  const isMember = members?.some(m => m.userId === user?.id) ?? false;
+  const canRequestJoin = Boolean(user && user.role === "student" && !isMember && !isLeader && team.status !== TeamStatus.completed);
 
   return (
     <AppLayout title={team.name}>
@@ -116,6 +153,15 @@ export default function TeamDetail() {
             </Link>
           </Button>
           <h2 className="text-2xl font-bold tracking-tight">Team Profile</h2>
+          {canRequestJoin && (
+            <Button
+              onClick={handleJoinRequest}
+              disabled={isRequestingJoin || hasSentJoinRequest}
+              className="ml-auto"
+            >
+              {hasSentJoinRequest ? "Request Sent" : isRequestingJoin ? "Sending..." : "Join Team"}
+            </Button>
+          )}
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">

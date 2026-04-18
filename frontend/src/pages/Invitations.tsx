@@ -48,15 +48,25 @@ export default function Invitations() {
     );
   }
 
-  const handleAccept = async (id: number) => {
+  const isJoinRequestForLeader = (invitation: (typeof invitationsList)[number]) => {
+    return invitation.invitedUserId === user?.id && invitation.team.leaderId === user?.id;
+  };
+
+  const handleAccept = async (invitation: (typeof invitationsList)[number]) => {
     try {
-      await acceptInvitation.mutateAsync({ id });
+      await acceptInvitation.mutateAsync({ id: invitation.id });
       queryClient.invalidateQueries({ queryKey: getListInvitationsQueryKey() });
+
+      const joinRequest = isJoinRequestForLeader(invitation);
       toast({
-        title: "Invitation Accepted",
-        description: "You have successfully joined the team.",
+        title: joinRequest ? "Join Request Accepted" : "Invitation Accepted",
+        description: joinRequest
+          ? "The student was added to your team."
+          : "You have successfully joined the team.",
       });
-      setLocation("/my-team");
+      if (!joinRequest) {
+        setLocation("/my-team");
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -66,13 +76,17 @@ export default function Invitations() {
     }
   };
 
-  const handleReject = async (id: number) => {
+  const handleReject = async (invitation: (typeof invitationsList)[number]) => {
     try {
-      await rejectInvitation.mutateAsync({ id });
+      await rejectInvitation.mutateAsync({ id: invitation.id });
       queryClient.invalidateQueries({ queryKey: getListInvitationsQueryKey() });
+
+      const joinRequest = isJoinRequestForLeader(invitation);
       toast({
-        title: "Invitation Rejected",
-        description: "You have rejected the team invitation.",
+        title: joinRequest ? "Join Request Rejected" : "Invitation Rejected",
+        description: joinRequest
+          ? "The join request was rejected."
+          : "You have rejected the team invitation.",
       });
     } catch (error: any) {
       toast({
@@ -146,31 +160,41 @@ export default function Invitations() {
                 <Card key={invitation.id} className="overflow-hidden border-primary/20 shadow-sm">
                   <div className="flex flex-col md:flex-row">
                     <div className="flex-1 p-6">
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge variant="outline" className="bg-blue-50 text-blue-700">New Request</Badge>
-                        <span className="text-xs text-muted-foreground flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {format(new Date(invitation.createdAt), "MMM d, yyyy")}
-                        </span>
-                      </div>
-                      <h3 className="text-xl font-bold mb-1">{invitation.team.name}</h3>
-                      {invitation.team.projectTitle && (
-                        <p className="text-sm font-medium text-foreground mb-3">{invitation.team.projectTitle}</p>
-                      )}
-                      
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground mt-4">
-                        <div className="flex items-center gap-1">
-                          <Users className="h-4 w-4" />
-                          {invitation.team.memberCount} existing members
-                        </div>
-                        <div>
-                          Invited by <span className="font-medium text-foreground">{invitation.invitedBy.name}</span>
-                        </div>
-                      </div>
+                      {(() => {
+                        const joinRequest = isJoinRequestForLeader(invitation);
+                        return (
+                          <>
+                            <div className="flex items-center justify-between mb-2">
+                              <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                                {joinRequest ? "Join Request" : "Team Invitation"}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {format(new Date(invitation.createdAt), "MMM d, yyyy")}
+                              </span>
+                            </div>
+                            <h3 className="text-xl font-bold mb-1">{invitation.team.name}</h3>
+                            {invitation.team.projectTitle && (
+                              <p className="text-sm font-medium text-foreground mb-3">{invitation.team.projectTitle}</p>
+                            )}
+
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground mt-4">
+                              <div className="flex items-center gap-1">
+                                <Users className="h-4 w-4" />
+                                {invitation.team.memberCount} existing members
+                              </div>
+                              <div>
+                                {joinRequest ? "Requested by" : "Invited by"}{" "}
+                                <span className="font-medium text-foreground">{invitation.invitedBy.name}</span>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                     <div className="bg-muted/30 p-6 flex flex-row md:flex-col items-center justify-center gap-3 border-t md:border-t-0 md:border-l">
                       <Button 
-                        onClick={() => handleAccept(invitation.id)} 
+                        onClick={() => handleAccept(invitation)} 
                         disabled={acceptInvitation.isPending || rejectInvitation.isPending}
                         className="w-full md:w-32 bg-primary hover:bg-primary/90"
                       >
@@ -178,7 +202,7 @@ export default function Invitations() {
                       </Button>
                       <Button 
                         variant="outline" 
-                        onClick={() => handleReject(invitation.id)} 
+                        onClick={() => handleReject(invitation)} 
                         disabled={acceptInvitation.isPending || rejectInvitation.isPending}
                         className="w-full md:w-32"
                       >

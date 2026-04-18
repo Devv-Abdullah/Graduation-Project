@@ -49,8 +49,37 @@ router.post("/invitations/:id/accept", requireAuth, async (req, res): Promise<vo
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [inv] = await db.select().from(invitationsTable).where(eq(invitationsTable.id, id));
-  if (!inv || inv.invitedUserId !== req.user!.id) { res.status(404).json({ error: "Invitation not found" }); return; }
+  if (!inv) { res.status(404).json({ error: "Invitation not found" }); return; }
   if (inv.status !== "pending") { res.status(400).json({ error: "Invitation already responded to" }); return; }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, inv.teamId));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+
+  const isLeaderJoinRequest = inv.invitedUserId === req.user!.id && team.leaderId === req.user!.id;
+
+  if (isLeaderJoinRequest) {
+    const [alreadyMember] = await db
+      .select()
+      .from(teamMembersTable)
+      .where(and(eq(teamMembersTable.teamId, team.id), eq(teamMembersTable.userId, inv.invitedByUserId)));
+
+    if (alreadyMember) {
+      await db.update(invitationsTable).set({ status: "accepted" }).where(eq(invitationsTable.id, id));
+      res.json({ message: "Join request already satisfied" });
+      return;
+    }
+
+    await db.update(invitationsTable).set({ status: "accepted" }).where(eq(invitationsTable.id, id));
+    await db.insert(teamMembersTable).values({ teamId: inv.teamId, userId: inv.invitedByUserId, role: "member" });
+
+    await logActivity("join_request_accepted", `${req.user!.name} accepted a join request for team "${team.name}"`, req.user!.id, inv.teamId);
+    await createNotification(inv.invitedByUserId, "join_request_accepted", `Your request to join "${team.name}" has been accepted`);
+
+    res.json({ message: "Join request accepted" });
+    return;
+  }
+
+  if (inv.invitedUserId !== req.user!.id) { res.status(404).json({ error: "Invitation not found" }); return; }
 
   const existing = await db.select().from(teamMembersTable).where(eq(teamMembersTable.userId, req.user!.id));
   if (existing.length > 0) { res.status(400).json({ error: "You are already in a team" }); return; }
@@ -58,9 +87,8 @@ router.post("/invitations/:id/accept", requireAuth, async (req, res): Promise<vo
   await db.update(invitationsTable).set({ status: "accepted" }).where(eq(invitationsTable.id, id));
   await db.insert(teamMembersTable).values({ teamId: inv.teamId, userId: req.user!.id, role: "member" });
 
-  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, inv.teamId));
-  await logActivity("invitation_accepted", `${req.user!.name} joined team "${team?.name}"`, req.user!.id, inv.teamId);
-  await createNotification(inv.invitedByUserId, "invitation_accepted", `${req.user!.name} accepted your invitation to join "${team?.name}"`);
+  await logActivity("invitation_accepted", `${req.user!.name} joined team "${team.name}"`, req.user!.id, inv.teamId);
+  await createNotification(inv.invitedByUserId, "invitation_accepted", `${req.user!.name} accepted your invitation to join "${team.name}"`);
 
   res.json({ message: "Invitation accepted" });
 });
@@ -71,9 +99,23 @@ router.post("/invitations/:id/reject", requireAuth, async (req, res): Promise<vo
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
 
   const [inv] = await db.select().from(invitationsTable).where(eq(invitationsTable.id, id));
-  if (!inv || inv.invitedUserId !== req.user!.id) { res.status(404).json({ error: "Invitation not found" }); return; }
+  if (!inv) { res.status(404).json({ error: "Invitation not found" }); return; }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, inv.teamId));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+
+  const isLeaderJoinRequest = inv.invitedUserId === req.user!.id && team.leaderId === req.user!.id;
+  if (!isLeaderJoinRequest && inv.invitedUserId !== req.user!.id) { res.status(404).json({ error: "Invitation not found" }); return; }
+  if (inv.status !== "pending") { res.status(400).json({ error: "Invitation already responded to" }); return; }
 
   await db.update(invitationsTable).set({ status: "rejected" }).where(eq(invitationsTable.id, id));
+
+  if (isLeaderJoinRequest) {
+    await createNotification(inv.invitedByUserId, "join_request_rejected", `Your request to join \"${team.name}\" was rejected`);
+    res.json({ message: "Join request rejected" });
+    return;
+  }
+
   res.json({ message: "Invitation rejected" });
 });
 

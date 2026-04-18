@@ -17,6 +17,14 @@ if (Number.isNaN(port) || port <= 0) {
 
 app.listen(port, (err) => {
   if (err) {
+    if ((err as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      logger.warn(
+        { port },
+        "Port already in use. Another backend instance is likely running.",
+      );
+      process.exit(0);
+    }
+
     logger.error({ err }, "Error listening on port");
     process.exit(1);
   }
