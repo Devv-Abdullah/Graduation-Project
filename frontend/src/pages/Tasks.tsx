@@ -5,12 +5,11 @@ import {
   getListTasksQueryKey, 
   useCreateTask, 
   TaskStatus,
-  TaskPhase,
   CreateTaskBodyPhase,
   useGetMyTeam,
   getGetMyTeamQueryKey,
-  useListTeams,
-  getListTeamsQueryKey
+  useGetSupervisorDashboard,
+  getGetSupervisorDashboardQueryKey,
 } from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -52,15 +51,17 @@ export default function Tasks() {
     }
   });
 
-  const { data: supervisorTeams } = useListTeams({
-    // Supervisor sees teams they supervise. Actually we just use useGetSupervisorDashboard or listTeams with some param.
-    // For now we'll just list all teams and filter in the UI if needed, or assume backend filters by role if no params.
-  }, {
+  const studentHasSupervisor = user?.role !== 'student' || Boolean(myTeam?.supervisorId);
+
+  const { data: supervisorDashboard } = useGetSupervisorDashboard({
     query: {
       enabled: user?.role === 'supervisor',
-      queryKey: getListTeamsQueryKey(),
+      queryKey: getGetSupervisorDashboardQueryKey(),
     }
   });
+
+  const supervisorTeams = supervisorDashboard?.teams ?? [];
+  const supervisorCanCreateTasks = user?.role === 'supervisor' && supervisorTeams.length > 0;
 
   // Filter tasks based on role.
   // Student: filter to their team.
@@ -68,7 +69,7 @@ export default function Tasks() {
   const { data: tasks, isLoading } = useListTasks({
     query: {
       queryKey: getListTasksQueryKey(),
-      enabled: user?.role === 'supervisor' || (user?.role === 'student' && !!myTeam),
+      enabled: user?.role === 'supervisor' || (user?.role === 'student' && !!myTeam && studentHasSupervisor),
     }
   });
 
@@ -118,7 +119,7 @@ export default function Tasks() {
     }
   };
 
-  const visibleTasks = user?.role === 'student' && myTeam
+  const visibleTasks = user?.role === 'student' && myTeam && studentHasSupervisor
     ? tasks?.filter((task) => task.teamId === myTeam.id) ?? []
     : tasks ?? [];
 
@@ -137,9 +138,11 @@ export default function Tasks() {
           {user?.role === 'supervisor' && (
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
-                <Button className="gap-2"><Plus className="h-4 w-4" /> Create Task</Button>
+                <Button className="gap-2" disabled={!supervisorCanCreateTasks}>
+                  <Plus className="h-4 w-4" /> Create Task
+                </Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[500px]">
+              <DialogContent className="sm:max-w-125">
                 <DialogHeader>
                   <DialogTitle>Create New Task</DialogTitle>
                   <DialogDescription>
@@ -246,11 +249,29 @@ export default function Tasks() {
           )}
         </div>
 
+        {user?.role === 'supervisor' && !supervisorCanCreateTasks ? (
+          <Card className="border-dashed">
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              You cannot create tasks until you are assigned to at least one team.
+            </CardContent>
+          </Card>
+        ) : null}
+
         {isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-32 w-full" />
             <Skeleton className="h-32 w-full" />
           </div>
+        ) : user?.role === 'student' && myTeam && !studentHasSupervisor ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center justify-center p-12 text-center">
+              <CheckSquare className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium">Tasks unavailable</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                Your team no longer has a supervisor, so tasks are hidden until a supervisor is assigned again.
+              </p>
+            </CardContent>
+          </Card>
         ) : tasks?.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center p-12 text-center">
@@ -287,7 +308,7 @@ export default function Tasks() {
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center justify-end min-w-[120px]">
+                        <div className="flex items-center justify-end min-w-30">
                           <Button asChild>
                             <Link href={`/tasks/${task.id}`}>
                               {user?.role === 'student' ? 'Submit Work' : 'View Details'} <ArrowRight className="ml-2 h-4 w-4" />

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { IRouter } from "express";
 import { db, usersTable, studentProfilesTable } from "@workspace/db";
-import { eq, gte, ilike, and } from "@workspace/db";
+import { eq } from "@workspace/db";
 import { requireAuth } from "../lib/session";
 
 const router: IRouter = Router();
@@ -10,6 +10,7 @@ function formatProfile(profile: typeof studentProfilesTable.$inferSelect, user: 
   return {
     id: profile.id,
     userId: profile.userId,
+    studentId: profile.studentId,
     gpa: profile.gpa,
     skills: profile.skills,
     interests: profile.interests,
@@ -54,16 +55,31 @@ router.get("/profiles/:userId", requireAuth, async (req, res): Promise<void> => 
 router.get("/profiles", requireAuth, async (req, res): Promise<void> => {
   const { skills, minGpa, search } = req.query as { skills?: string; minGpa?: string; search?: string };
 
-  const profileResults = await db.select().from(studentProfilesTable);
   const userResults = await db.select().from(usersTable).where(eq(usersTable.role, "student"));
+  const profileResults = await db.select().from(studentProfilesTable);
 
   const userMap = new Map(userResults.map(u => [u.id, u]));
+  const profileMap = new Map(profileResults.map(p => [p.userId, p]));
 
-  let results = profileResults
-    .map(p => {
-      const user = userMap.get(p.userId);
+  const missingStudentUsers = userResults.filter((u) => !profileMap.has(u.id));
+  if (missingStudentUsers.length > 0) {
+    const createdProfiles = await db
+      .insert(studentProfilesTable)
+      .values(missingStudentUsers.map((u) => ({ userId: u.id })))
+      .returning();
+
+    for (const profile of createdProfiles) {
+      profileMap.set(profile.userId, profile);
+    }
+  }
+
+  let results = userResults
+    .map(u => {
+      const profile = profileMap.get(u.id);
+      if (!profile) return null;
+      const user = userMap.get(u.id);
       if (!user) return null;
-      return formatProfile(p, user);
+      return formatProfile(profile, user);
     })
     .filter(Boolean) as ReturnType<typeof formatProfile>[];
 

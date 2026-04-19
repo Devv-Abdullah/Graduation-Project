@@ -109,7 +109,7 @@ function applyDefaults(tableName: string, row: Row): Row {
     case "project_phases":
       return { status: "in_progress", startedAt: now, completedAt: null, ...row };
     case "tasks":
-      return { description: null, deadline: null, status: "pending", createdAt: now, ...row };
+      return { description: null, deadline: null, supervisorId: null, status: "pending", createdAt: now, ...row };
     case "submissions":
       return { fileUrl: null, notes: null, status: "pending", feedback: null, submittedAt: now, ...row };
     case "meetings":

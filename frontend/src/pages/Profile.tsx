@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { User as UserIcon, Book, Star, FileText, GraduationCap } from "lucide-react";
 
 const profileSchema = z.object({
-  gpa: z.coerce.number().min(0).max(4).optional().nullable(),
+  gpa: z.coerce.number().min(0).max(4.2).optional().nullable(),
   skills: z.string().optional().nullable(),
   interests: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
@@ -112,7 +112,7 @@ export default function Profile() {
         <Card>
           <CardContent className="p-6">
             <div className="flex items-start gap-6">
-              <div className="h-20 w-20 rounded-full bg-primary/10 flex flex-shrink-0 items-center justify-center text-primary text-3xl font-bold">
+              <div className="h-20 w-20 rounded-full bg-primary/10 flex shrink-0 items-center justify-center text-primary text-3xl font-bold">
                 {user.name.charAt(0)}
               </div>
               <div className="space-y-1">
@@ -173,7 +173,7 @@ export default function Profile() {
                               type="number" 
                               step="0.01" 
                               min="0" 
-                              max="4" 
+                              max="4.2" 
                               placeholder="3.8" 
                               {...field} 
                               value={field.value || ''} 
@@ -231,7 +231,7 @@ export default function Profile() {
                         <FormControl>
                           <Textarea 
                             placeholder="Brief description of your background and what you're looking for in a graduation project..." 
-                            className="min-h-[120px]"
+                            className="min-h-30"
                             {...field}
                             value={field.value || ''} 
                           />

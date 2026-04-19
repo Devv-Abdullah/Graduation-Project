@@ -1,7 +1,7 @@
 import { Router } from "express";
 import type { IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, studentProfilesTable } from "@workspace/db";
 import { eq } from "@workspace/db";
 import { RegisterBody, LoginBody } from "@workspace/api-zod";
 import { requireAuth } from "../lib/session";
@@ -15,7 +15,12 @@ router.post("/auth/register", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const { name, email, password, role } = parsed.data;
+  const { name, email, password, role, studentId } = parsed.data;
+
+  if (role === "student" && !studentId) {
+    res.status(400).json({ error: "studentId is required for student registration" });
+    return;
+  }
 
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.email, email));
   if (existing) {
@@ -25,6 +30,13 @@ router.post("/auth/register", async (req, res): Promise<void> => {
 
   const passwordHash = await bcrypt.hash(password, 12);
   const [user] = await db.insert(usersTable).values({ name, email, passwordHash, role }).returning();
+
+  if (role === "student") {
+    await db.insert(studentProfilesTable).values({
+      userId: user.id,
+      studentId: studentId ?? null,
+    });
+  }
 
   req.session.userId = user.id;
 

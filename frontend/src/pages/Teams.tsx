@@ -88,8 +88,10 @@ export default function Teams() {
     }
   };
 
+  const isSupervisor = user?.role === "supervisor";
+
   return (
-    <AppLayout title="Browse Teams">
+    <AppLayout title={isSupervisor ? "My Teams" : "Browse Teams"}>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row justify-between gap-4">
           <div className="relative w-full max-w-md">
@@ -108,7 +110,7 @@ export default function Teams() {
               <DialogTrigger asChild>
                 <Button>Create Team</Button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[425px]">
+              <DialogContent className="sm:max-w-106.25">
                 <DialogHeader>
                   <DialogTitle>Create Team</DialogTitle>
                   <DialogDescription>
@@ -192,7 +194,11 @@ export default function Teams() {
             <Users className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium">No teams found</h3>
             <p className="text-muted-foreground max-w-sm mt-1">
-              {search ? "No teams match your search criteria." : "There are no teams available in the system yet."}
+              {search
+                ? "No teams match your search criteria."
+                : isSupervisor
+                  ? "You are not assigned to any team yet."
+                  : "There are no teams available in the system yet."}
             </p>
           </div>
         ) : (
@@ -220,7 +226,7 @@ export default function Teams() {
                     {team.supervisorId && (
                       <div className="flex items-center gap-1">
                         <Briefcase className="h-4 w-4" />
-                        <span className="truncate max-w-[120px]">{team.supervisor?.name}</span>
+                        <span className="truncate max-w-30">{team.supervisor?.name}</span>
                       </div>
                     )}
                   </div>

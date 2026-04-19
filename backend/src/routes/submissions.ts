@@ -11,6 +11,11 @@ import { pipeline } from "node:stream/promises";
 
 const router: IRouter = Router();
 
+function isTaskVisibleForSupervisor(task: typeof tasksTable.$inferSelect, supervisorId: number | null | undefined) {
+  if (!supervisorId) return false;
+  return task.supervisorId == null || task.supervisorId === supervisorId;
+}
+
 function safeFileName(fileName: string): string {
   const base = path.basename(fileName).replace(/[^a-zA-Z0-9._-]+/g, "_");
   return base || "submission.pdf";
@@ -63,7 +68,11 @@ router.get("/submissions", requireAuth, async (req, res): Promise<void> => {
   if (req.user!.role === "student") {
     const [membership] = await db.select().from(teamMembersTable).where(eq(teamMembersTable.userId, req.user!.id));
     if (!membership) { res.json([]); return; }
-    const tasks = await db.select().from(tasksTable).where(eq(tasksTable.teamId, membership.teamId));
+    const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, membership.teamId));
+    if (!team || !team.supervisorId) { res.json([]); return; }
+
+    const tasks = (await db.select().from(tasksTable).where(eq(tasksTable.teamId, membership.teamId)))
+      .filter((task) => isTaskVisibleForSupervisor(task, team.supervisorId));
     const taskIds = tasks.map(t => t.id);
     if (taskIds.length === 0) { res.json([]); return; }
     
@@ -120,6 +129,24 @@ router.post("/submissions/upload", requireAuth, async (req, res): Promise<void> 
     return;
   }
 
+  if (req.user!.role === "student") {
+    const [membership] = await db.select().from(teamMembersTable).where(eq(teamMembersTable.userId, req.user!.id));
+    if (!membership || membership.teamId !== task.teamId) {
+      res.status(403).json({ error: "You are not allowed to submit this task" });
+      return;
+    }
+
+    const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, task.teamId));
+    if (!team || !team.supervisorId) {
+      res.status(403).json({ error: "Your team no longer has a supervisor, so task submission is disabled" });
+      return;
+    }
+    if (!isTaskVisibleForSupervisor(task, team.supervisorId)) {
+      res.status(403).json({ error: "This task belongs to a previous supervisor assignment and cannot be submitted now" });
+      return;
+    }
+  }
+
   mkdirSync(getUploadDir(), { recursive: true });
 
   const storedName = `${randomUUID()}-${safeFileName(originalName)}`;
@@ -154,6 +181,24 @@ router.post("/submissions", requireAuth, async (req, res): Promise<void> => {
 
   const [task] = await db.select().from(tasksTable).where(eq(tasksTable.id, taskId));
   if (!task) { res.status(404).json({ error: "Task not found" }); return; }
+
+  if (req.user!.role === "student") {
+    const [membership] = await db.select().from(teamMembersTable).where(eq(teamMembersTable.userId, req.user!.id));
+    if (!membership || membership.teamId !== task.teamId) {
+      res.status(403).json({ error: "You are not allowed to submit this task" });
+      return;
+    }
+
+    const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, task.teamId));
+    if (!team || !team.supervisorId) {
+      res.status(403).json({ error: "Your team no longer has a supervisor, so task submission is disabled" });
+      return;
+    }
+    if (!isTaskVisibleForSupervisor(task, team.supervisorId)) {
+      res.status(403).json({ error: "This task belongs to a previous supervisor assignment and cannot be submitted now" });
+      return;
+    }
+  }
 
   const [sub] = await db.insert(submissionsTable).values({ taskId, submittedById: req.user!.id, fileUrl, notes, status: "pending" }).returning();
   await db.update(tasksTable).set({ status: "submitted" }).where(eq(tasksTable.id, taskId));

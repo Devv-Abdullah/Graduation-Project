@@ -4,6 +4,7 @@ import { defineTable } from "./_core";
 export type Task = {
   id: number;
   teamId: number;
+  supervisorId: number | null;
   title: string;
   description: string | null;
   deadline: Date | null;
@@ -15,6 +16,7 @@ export type Task = {
 export const tasksTable = defineTable<Task>("tasks", [
   "id",
   "teamId",
+  "supervisorId",
   "title",
   "description",
   "deadline",
@@ -25,6 +27,7 @@ export const tasksTable = defineTable<Task>("tasks", [
 
 export const insertTaskSchema = z.object({
   teamId: z.number(),
+  supervisorId: z.number().nullable().optional(),
   title: z.string(),
   description: z.string().nullable().optional(),
   deadline: z.date().nullable().optional(),

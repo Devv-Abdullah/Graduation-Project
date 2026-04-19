@@ -233,11 +233,9 @@ export default function MyTeam() {
                 </DialogContent>
               </Dialog>
             )}
-            {!isLeader && (
-              <Button variant="destructive" className="gap-2" onClick={handleLeave} disabled={leaveTeam.isPending}>
-                <LogOut className="h-4 w-4" /> Leave Team
-              </Button>
-            )}
+            <Button variant="destructive" className="gap-2" onClick={handleLeave} disabled={leaveTeam.isPending}>
+              <LogOut className="h-4 w-4" /> Leave Team
+            </Button>
           </div>
         </div>
 

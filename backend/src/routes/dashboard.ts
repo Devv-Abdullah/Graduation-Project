@@ -94,6 +94,7 @@ router.get("/dashboard/coordinator", requireAuth, requireRole("coordinator"), as
   const allSupervisors = await db.select({ id: usersTable.id, name: usersTable.name, email: usersTable.email, role: usersTable.role, createdAt: usersTable.createdAt }).from(usersTable).where(eq(usersTable.role, "supervisor"));
 
   const unassignedTeams = allTeams.filter(t => !t.supervisorId);
+  const assignedTeams = allTeams.filter(t => Boolean(t.supervisorId));
   const proposalTeams = allTeams.filter(t => t.currentPhase === "proposal").length;
   const progressTeams = allTeams.filter(t => t.currentPhase === "progress").length;
   const finalTeams = allTeams.filter(t => t.currentPhase === "final").length;
@@ -104,6 +105,7 @@ router.get("/dashboard/coordinator", requireAuth, requireRole("coordinator"), as
   }));
 
   const unassignedFormatted = await Promise.all(unassignedTeams.slice(0, 10).map(formatTeamBasic));
+  const assignedFormatted = await Promise.all(assignedTeams.slice(0, 20).map(formatTeamBasic));
 
   const recentActivity = await db.select().from(activityLogsTable).orderBy(desc(activityLogsTable.createdAt)).limit(10);
   const activityWithUsers = await Promise.all(recentActivity.map(async a => {
@@ -115,7 +117,7 @@ router.get("/dashboard/coordinator", requireAuth, requireRole("coordinator"), as
     return { ...a, user };
   }));
 
-  res.json({ totalTeams: allTeams.length, unassignedTeams: unassignedTeams.length, totalStudents: allStudents.length, totalSupervisors: allSupervisors.length, teamsPerPhase: { proposal: proposalTeams, progress: progressTeams, final: finalTeams }, supervisorWorkload, unassignedTeamsList: unassignedFormatted, recentActivity: activityWithUsers });
+  res.json({ totalTeams: allTeams.length, unassignedTeams: unassignedTeams.length, totalStudents: allStudents.length, totalSupervisors: allSupervisors.length, teamsPerPhase: { proposal: proposalTeams, progress: progressTeams, final: finalTeams }, supervisorWorkload, unassignedTeamsList: unassignedFormatted, assignedTeamsList: assignedFormatted, recentActivity: activityWithUsers });
 });
 
 router.get("/activity-logs", requireAuth, requireRole("coordinator"), async (req, res): Promise<void> => {

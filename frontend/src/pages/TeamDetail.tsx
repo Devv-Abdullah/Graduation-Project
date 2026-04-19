@@ -6,11 +6,22 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useParams } from "wouter";
-import { Users, Briefcase, Mail, Activity, ArrowLeft } from "lucide-react";
+import { Users, Briefcase, Mail, Activity, ArrowLeft, UserMinus } from "lucide-react";
 import { Link } from "wouter";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useQueryClient } from "@tanstack/react-query";
@@ -41,6 +52,9 @@ export default function TeamDetail() {
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
   const [isRequestingJoin, setIsRequestingJoin] = useState(false);
   const [hasSentJoinRequest, setHasSentJoinRequest] = useState(false);
+  const [transferTargetId, setTransferTargetId] = useState<number | null>(null);
+
+  const isLeader = members?.some(m => m.userId === user?.id && m.role === 'leader');
 
   const handleInvite = async () => {
     try {
@@ -106,6 +120,50 @@ export default function TeamDetail() {
     }
   };
 
+  const handleRemoveMember = async (memberUserId: number) => {
+    try {
+      const response = await fetch(`/api/teams/${teamId}/members/${memberUserId}/remove`, {
+        method: "POST",
+        credentials: "include",
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to remove member.");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: getGetTeamMembersQueryKey(teamId) });
+      await queryClient.invalidateQueries({ queryKey: getGetTeamQueryKey(teamId) });
+      toast({ title: "Member removed", description: "The member has been removed from the team." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to remove member.", variant: "destructive" });
+    }
+  };
+
+  const handleTransferLeadership = async (memberUserId: number) => {
+    try {
+      const response = await fetch(`/api/teams/${teamId}/transfer-leader`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ memberId: memberUserId }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to transfer leadership.");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: getGetTeamMembersQueryKey(teamId) });
+      await queryClient.invalidateQueries({ queryKey: getGetTeamQueryKey(teamId) });
+      toast({ title: "Leadership transferred", description: "The selected member is now the team leader." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to transfer leadership.", variant: "destructive" });
+    } finally {
+      setTransferTargetId(null);
+    }
+  };
+
   if (isLoadingTeam || isLoadingMembers) {
     return (
       <AppLayout title="Team Details">
@@ -139,7 +197,6 @@ export default function TeamDetail() {
     );
   }
 
-  const isLeader = members?.some(m => m.userId === user?.id && m.role === 'leader');
   const isMember = members?.some(m => m.userId === user?.id) ?? false;
   const canRequestJoin = Boolean(user && user.role === "student" && !isMember && !isLeader && team.status !== TeamStatus.completed);
 
@@ -267,9 +324,48 @@ export default function TeamDetail() {
                           <p className="text-xs text-muted-foreground">{member.user.email}</p>
                         </div>
                       </div>
-                      <Badge variant={member.role === 'leader' ? "default" : "secondary"} className="capitalize">
-                        {member.role}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={member.role === 'leader' ? "default" : "secondary"} className="capitalize">
+                          {member.role}
+                        </Badge>
+                        {isLeader && member.userId !== user?.id && (
+                          <div className="flex items-center gap-2">
+                            <AlertDialog open={transferTargetId === member.userId} onOpenChange={(open) => setTransferTargetId(open ? member.userId : null)}>
+                              <AlertDialogTrigger asChild>
+                                <Button size="sm" variant="outline" className="gap-2 cursor-pointer transition-colors hover:bg-muted/80">
+                                  Make Leader
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent>
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Transfer leadership?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    You are about to make <strong>{member.user.name}</strong> the new leader of <strong>{team.name}</strong>.
+                                    You will remain a team member after the transfer.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    className="cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90"
+                                    onClick={() => handleTransferLeadership(member.userId)}
+                                  >
+                                    Yes, transfer leadership
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="gap-2 cursor-pointer transition-colors hover:bg-destructive/90"
+                              onClick={() => handleRemoveMember(member.userId)}
+                            >
+                              <UserMinus className="h-4 w-4" /> Remove
+                            </Button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                   {(!members || members.length === 0) && (

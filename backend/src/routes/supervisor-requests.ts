@@ -1,6 +1,6 @@
 import { Router } from "express";
 import type { IRouter } from "express";
-import { db, usersTable, teamsTable, supervisorRequestsTable, teamMembersTable } from "@workspace/db";
+import { db, usersTable, teamsTable, supervisorRequestsTable, teamMembersTable, tasksTable } from "@workspace/db";
 import { eq, and, sql, or } from "@workspace/db";
 import { requireAuth, requireRole } from "../lib/session";
 import { createNotification, logActivity } from "../lib/notify";
@@ -108,6 +108,37 @@ router.post("/coordinator/assign-supervisor", requireAuth, requireRole("coordina
   await logActivity("supervisor_assigned_by_coordinator", `Coordinator assigned ${supervisor.name} to team "${team.name}"`, req.user!.id, teamId);
 
   res.json({ message: "Supervisor assigned successfully" });
+});
+
+router.post("/coordinator/unassign-supervisor", requireAuth, requireRole("coordinator"), async (req, res): Promise<void> => {
+  const { teamId } = req.body;
+  if (!teamId) { res.status(400).json({ error: "teamId required" }); return; }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+  if (!team.supervisorId) { res.status(400).json({ error: "Team does not have a supervisor assigned" }); return; }
+
+  const [supervisor] = await db.select().from(usersTable).where(eq(usersTable.id, team.supervisorId));
+
+  // Preserve task history: bind legacy tasks (without supervisorId) to the outgoing supervisor.
+  const teamTasks = await db.select().from(tasksTable).where(eq(tasksTable.teamId, teamId));
+  for (const task of teamTasks) {
+    if (task.supervisorId == null) {
+      await db.update(tasksTable)
+        .set({ supervisorId: team.supervisorId })
+        .where(eq(tasksTable.id, task.id));
+    }
+  }
+
+  await db.update(teamsTable).set({ supervisorId: null, status: "active" }).where(eq(teamsTable.id, teamId));
+
+  const members = await db.select().from(teamMembersTable).where(eq(teamMembersTable.teamId, teamId));
+  for (const m of members) {
+    await createNotification(m.userId, "supervisor_unassigned", `Supervisor ${supervisor?.name || "unknown"} has been removed from your team`);
+  }
+  await logActivity("supervisor_unassigned_by_coordinator", `Coordinator removed ${supervisor?.name || "supervisor"} from team "${team.name}"`, req.user!.id, teamId);
+
+  res.json({ message: "Supervisor removed successfully" });
 });
 
 export default router;

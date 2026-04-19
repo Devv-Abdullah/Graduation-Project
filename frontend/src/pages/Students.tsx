@@ -9,18 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Search, User, Star, GraduationCap, Book } from "lucide-react";
-import { useState } from "react";
-import { useDebounce } from "@/hooks/use-debounce"; // We need a simple debounce, or just use state directly since it's simple
-
-// Simple local hook since useDebounce might not exist
-function useDebounceLocal<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState<T>(value);
-  useState(() => {
-    const handler = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(handler);
-  }); // Using a simple useEffect would be better but let's just implement inline or without debounce
-  return value; // For simplicity in this generated code, we'll skip actual debounce if we don't write the hook.
-}
+import { useMemo, useState } from "react";
+import { useDebounce } from "@/hooks/use-debounce";
 
 export default function Students() {
   const { user } = useAuth();
@@ -28,25 +18,44 @@ export default function Students() {
   const [skills, setSkills] = useState("");
   const [minGpa, setMinGpa] = useState<string>("");
 
+  const debouncedSearch = useDebounce(search.trim(), 300);
+  const debouncedSkills = useDebounce(skills.trim(), 300);
+  const parsedMinGpa = minGpa.trim() ? Number(minGpa) : undefined;
+  const minGpaFilter = Number.isFinite(parsedMinGpa) ? parsedMinGpa : undefined;
+
   const { data: profiles, isLoading } = useListProfiles(
     { 
-      search: search || undefined,
-      skills: skills || undefined,
-      minGpa: minGpa ? parseFloat(minGpa) : undefined,
+      search: debouncedSearch || undefined,
+      skills: debouncedSkills || undefined,
+      minGpa: minGpaFilter,
     },
     {
       query: {
         queryKey: getListProfilesQueryKey({ 
-          search: search || undefined,
-          skills: skills || undefined,
-          minGpa: minGpa ? parseFloat(minGpa) : undefined,
+          search: debouncedSearch || undefined,
+          skills: debouncedSkills || undefined,
+          minGpa: minGpaFilter,
         }),
         enabled: user?.role === 'supervisor' || user?.role === 'coordinator'
       }
     }
   );
 
-  const profilesList = Array.isArray(profiles) ? profiles : [];
+  const profilesList = useMemo(() => {
+    const rawProfiles = Array.isArray(profiles) ? profiles : [];
+    const searchFilter = search.trim().toLowerCase();
+    const skillsFilter = skills.trim().toLowerCase();
+    const gpaFilter = Number.isFinite(parsedMinGpa) ? parsedMinGpa : undefined;
+
+    return rawProfiles.filter((profile) => {
+      const matchesName = !searchFilter || profile.user.name.toLowerCase().includes(searchFilter);
+      const matchesSkills = !skillsFilter || (profile.skills ?? "").toLowerCase().includes(skillsFilter);
+      const matchesGpa = gpaFilter === undefined || ((profile.gpa ?? -Infinity) >= gpaFilter);
+      return matchesName && matchesSkills && matchesGpa;
+    });
+  }, [profiles, search, skills, parsedMinGpa]);
+
+  const showEmptyState = !isLoading && profilesList.length === 0;
 
   if (user?.role === 'student') {
     return (
@@ -122,7 +131,9 @@ export default function Students() {
               </Card>
             ))}
           </div>
-        ) : profilesList.length === 0 ? (
+        ) : null}
+
+        {showEmptyState ? (
           <div className="flex flex-col items-center justify-center p-12 text-center bg-card rounded-lg border border-dashed">
             <User className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium">No students found</h3>
@@ -130,7 +141,9 @@ export default function Students() {
               Try adjusting your filters to find more students.
             </p>
           </div>
-        ) : (
+        ) : null}
+
+        {!isLoading && !showEmptyState ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {profilesList.map(profile => (
               <Card key={profile.id} className="flex flex-col">
@@ -188,7 +201,7 @@ export default function Students() {
               </Card>
             ))}
           </div>
-        )}
+        ) : null}
       </div>
     </AppLayout>
   );

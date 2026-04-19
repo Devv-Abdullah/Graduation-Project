@@ -17,13 +17,24 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
-import { Users, Briefcase, Activity, UserPlus, Clock } from "lucide-react";
+import { Users, Briefcase, Activity, UserPlus, Clock, UserMinus } from "lucide-react";
 import { format } from "date-fns";
 
 const assignSchema = z.object({
@@ -36,6 +47,7 @@ export default function Coordinator() {
   const { toast } = useToast();
   
   const [assigningTeamId, setAssigningTeamId] = useState<number | null>(null);
+  const [removingTeamId, setRemovingTeamId] = useState<number | null>(null);
 
   const { data: dashboard, isLoading: dashboardLoading } = useGetCoordinatorDashboard({
     query: {
@@ -62,6 +74,31 @@ export default function Coordinator() {
   });
 
   const assignSupervisor = useCoordinatorAssignSupervisor();
+
+  const handleRemoveSupervisor = async (teamId: number) => {
+    setRemovingTeamId(teamId);
+    try {
+      const response = await fetch("/api/coordinator/unassign-supervisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ teamId }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to remove supervisor.");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: getGetCoordinatorDashboardQueryKey() });
+      await queryClient.invalidateQueries({ queryKey: getListActivityLogsQueryKey() });
+      toast({ title: "Supervisor Removed", description: "The team no longer has a supervisor assigned." });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message || "Failed to remove supervisor.", variant: "destructive" });
+    } finally {
+      setRemovingTeamId(null);
+    }
+  };
 
   const form = useForm<z.infer<typeof assignSchema>>({
     resolver: zodResolver(assignSchema),
@@ -143,7 +180,7 @@ export default function Coordinator() {
                           if (!open) form.reset();
                         }}>
                           <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" className="shrink-0 gap-2">
+                            <Button size="sm" variant="outline" className="shrink-0 gap-2 cursor-pointer transition-colors hover:bg-muted/80">
                               <UserPlus className="h-4 w-4" /> Assign
                             </Button>
                           </DialogTrigger>
@@ -184,8 +221,8 @@ export default function Coordinator() {
                                   )}
                                 />
                                 <DialogFooter>
-                                  <Button type="button" variant="outline" onClick={() => setAssigningTeamId(null)}>Cancel</Button>
-                                  <Button type="submit" disabled={assignSupervisor.isPending}>
+                                  <Button type="button" variant="outline" className="cursor-pointer transition-colors hover:bg-muted/80" onClick={() => setAssigningTeamId(null)}>Cancel</Button>
+                                  <Button type="submit" className="cursor-pointer transition-colors hover:opacity-90" disabled={assignSupervisor.isPending}>
                                     {assignSupervisor.isPending ? "Assigning..." : "Assign"}
                                   </Button>
                                 </DialogFooter>
@@ -193,6 +230,72 @@ export default function Coordinator() {
                             </Form>
                           </DialogContent>
                         </Dialog>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <UserMinus className="h-5 w-5 text-primary" /> Assigned Teams
+                </CardTitle>
+                <CardDescription>Teams that currently have a supervisor assigned.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {dashboardLoading ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-16 w-full" />
+                    <Skeleton className="h-16 w-full" />
+                  </div>
+                ) : !dashboard?.assignedTeamsList || dashboard.assignedTeamsList.length === 0 ? (
+                  <div className="text-center p-6 border rounded-lg border-dashed">
+                    <p className="text-muted-foreground">No teams currently have supervisors assigned.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {dashboard.assignedTeamsList.map(team => (
+                      <div key={team.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between border rounded-lg p-4 gap-4">
+                        <div>
+                          <h4 className="font-bold text-base">{team.name}</h4>
+                          <p className="text-sm text-muted-foreground">{team.projectTitle || 'No project title'}</p>
+                          <p className="text-xs mt-1 font-medium">
+                            Supervisor: {team.supervisor?.name || "Unknown"}
+                          </p>
+                        </div>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              className="shrink-0 gap-2 cursor-pointer transition-colors hover:bg-destructive/90"
+                              disabled={removingTeamId === team.id}
+                            >
+                              <UserMinus className="h-4 w-4" />
+                              {removingTeamId === team.id ? "Removing..." : "Remove Supervisor"}
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Remove Supervisor Assignment?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                You are about to remove <strong>{team.supervisor?.name || "the current supervisor"}</strong> from team <strong>{team.name}</strong>.
+                                This will unassign the team and may affect who can view or submit tasks.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                onClick={() => handleRemoveSupervisor(team.id)}
+                              >
+                                Yes, remove supervisor
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       </div>
                     ))}
                   </div>

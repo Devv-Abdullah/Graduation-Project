@@ -18,10 +18,41 @@ async function formatTeam(team: typeof teamsTable.$inferSelect) {
   return { ...team, leader, supervisor, memberCount: countResult?.count ?? 0 };
 }
 
+async function promoteNextLeader(teamId: number, excludeUserId: number) {
+  const remainingMembers = await db
+    .select()
+    .from(teamMembersTable)
+    .where(eq(teamMembersTable.teamId, teamId));
+
+  const candidates = remainingMembers
+    .filter((member) => member.userId !== excludeUserId)
+    .sort((a, b) => new Date(a.joinedAt).getTime() - new Date(b.joinedAt).getTime());
+
+  const nextLeader = candidates[0];
+  if (!nextLeader) {
+    return null;
+  }
+
+  await db.update(teamMembersTable)
+    .set({ role: "leader" })
+    .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, nextLeader.userId)));
+
+  await db.update(teamsTable)
+    .set({ leaderId: nextLeader.userId })
+    .where(eq(teamsTable.id, teamId));
+
+  return nextLeader;
+}
+
 router.get("/teams", requireAuth, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
   let teamsQuery = db.select().from(teamsTable);
   const conds = [];
+
+  if (req.user!.role === "supervisor") {
+    conds.push(eq(teamsTable.supervisorId, req.user!.id));
+  }
+
   if (status) conds.push(eq(teamsTable.status, status as "forming" | "active" | "supervised" | "completed"));
   if (search) conds.push(ilike(teamsTable.name, `%${search}%`));
   const teams = conds.length > 0 ? await teamsQuery.where(and(...conds)) : await teamsQuery;
@@ -139,9 +170,84 @@ router.post("/teams/:id/leave", requireAuth, async (req, res): Promise<void> => 
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, id));
   if (!team) { res.status(404).json({ error: "Team not found" }); return; }
-  if (team.leaderId === req.user!.id) { res.status(400).json({ error: "Team leader cannot leave. Delete the team instead." }); return; }
+  const [membership] = await db.select().from(teamMembersTable).where(and(eq(teamMembersTable.teamId, id), eq(teamMembersTable.userId, req.user!.id)));
+  if (!membership) { res.status(404).json({ error: "You are not in this team" }); return; }
+
+  if (team.leaderId === req.user!.id) {
+    const nextLeader = await promoteNextLeader(id, req.user!.id);
+    if (!nextLeader) {
+      res.status(400).json({ error: "You need at least one other member before leaving so leadership can be transferred" });
+      return;
+    }
+  }
+
   await db.delete(teamMembersTable).where(and(eq(teamMembersTable.teamId, id), eq(teamMembersTable.userId, req.user!.id)));
+  await logActivity("team_left", `${req.user!.name} left team "${team.name}"`, req.user!.id, id);
   res.json({ message: "Left team successfully" });
+});
+
+router.post("/teams/:id/members/:memberId/remove", requireAuth, async (req, res): Promise<void> => {
+  const teamRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const memberRaw = Array.isArray(req.params.memberId) ? req.params.memberId[0] : req.params.memberId;
+  const teamId = parseInt(teamRaw, 10);
+  const memberId = parseInt(memberRaw, 10);
+  if (isNaN(teamId) || isNaN(memberId)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+  if (team.leaderId !== req.user!.id) { res.status(403).json({ error: "Only the team leader can remove members" }); return; }
+  if (memberId === team.leaderId) { res.status(400).json({ error: "Leader cannot remove themselves here" }); return; }
+
+  const [membership] = await db.select().from(teamMembersTable).where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, memberId)));
+  if (!membership) { res.status(404).json({ error: "Member not found in this team" }); return; }
+
+  await db.delete(teamMembersTable).where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, memberId)));
+  await createNotification(memberId, "team_removed", `You were removed from team "${team.name}" by the leader`);
+  await logActivity("team_member_removed", `${req.user!.name} removed a member from team "${team.name}"`, req.user!.id, teamId);
+
+  res.json({ message: "Member removed successfully" });
+});
+
+router.post("/teams/:id/transfer-leader", requireAuth, async (req, res): Promise<void> => {
+  const teamRaw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const teamId = parseInt(teamRaw, 10);
+  const { memberId } = req.body;
+  const newLeaderId = parseInt(String(memberId || ""), 10);
+
+  if (isNaN(teamId) || isNaN(newLeaderId)) {
+    res.status(400).json({ error: "Invalid id" });
+    return;
+  }
+
+  const [team] = await db.select().from(teamsTable).where(eq(teamsTable.id, teamId));
+  if (!team) { res.status(404).json({ error: "Team not found" }); return; }
+  if (team.leaderId !== req.user!.id) { res.status(403).json({ error: "Only the current leader can transfer leadership" }); return; }
+  if (newLeaderId === team.leaderId) { res.status(400).json({ error: "This member is already the leader" }); return; }
+
+  const [currentLeaderMembership] = await db.select().from(teamMembersTable).where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, req.user!.id)));
+  const [targetMembership] = await db.select().from(teamMembersTable).where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, newLeaderId)));
+
+  if (!currentLeaderMembership || !targetMembership) {
+    res.status(404).json({ error: "Member not found in this team" });
+    return;
+  }
+
+  await db.update(teamMembersTable)
+    .set({ role: "member" })
+    .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, req.user!.id)));
+
+  await db.update(teamMembersTable)
+    .set({ role: "leader" })
+    .where(and(eq(teamMembersTable.teamId, teamId), eq(teamMembersTable.userId, newLeaderId)));
+
+  await db.update(teamsTable).set({ leaderId: newLeaderId }).where(eq(teamsTable.id, teamId));
+
+  const [newLeader] = await db.select().from(usersTable).where(eq(usersTable.id, newLeaderId));
+  await createNotification(newLeaderId, "team_leader_assigned", `You are now the leader of team "${team.name}"`);
+  await createNotification(req.user!.id, "team_leader_transferred", `You transferred leadership of team "${team.name}" to ${newLeader?.name || "another member"}`);
+  await logActivity("team_leader_transferred", `${req.user!.name} transferred leadership of team "${team.name}" to ${newLeader?.name || "another member"}`, req.user!.id, teamId);
+
+  res.json({ message: "Leadership transferred successfully" });
 });
 
 export default router;

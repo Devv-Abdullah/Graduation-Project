@@ -106,7 +106,8 @@ export default function TaskDetail() {
     });
 
     if (!uploadResponse.ok) {
-      throw new Error("Failed to upload submission file.");
+      const errorBody = await uploadResponse.json().catch(() => null) as { error?: string } | null;
+      throw new Error(errorBody?.error || "Failed to upload submission file.");
     }
 
     return uploadResponse.json() as Promise<Submission>;
@@ -271,7 +272,8 @@ export default function TaskDetail() {
 
   const taskSubmissions = submissions ?? [];
 
-  const canSubmit = user?.role === 'student' && task.status !== TaskStatus.reviewed;
+  const teamHasSupervisor = Boolean(task.team?.supervisorId);
+  const canSubmit = user?.role === 'student' && task.status !== TaskStatus.reviewed && teamHasSupervisor;
 
   return (
     <AppLayout title="Task Details">
@@ -398,6 +400,11 @@ export default function TaskDetail() {
                 )}
               </CardHeader>
               <CardContent>
+                {user?.role === 'student' && !teamHasSupervisor ? (
+                  <div className="mb-4 rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    Your team no longer has a supervisor, so this task cannot be submitted right now.
+                  </div>
+                ) : null}
                 <div className="space-y-6">
                   {submissionsLoading ? (
                     <div className="space-y-3">
